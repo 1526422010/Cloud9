@@ -287,7 +287,14 @@ docker pull linuxserver/cloud9:latest
 
 # Jalankan ulang dengan perintah di Step 5
 ```
+## 🔄 INSTALL PYTHON 3
 
+```bash
+apt update
+apt install python3 -y
+sudo apt install python3-pip
+
+```
 ## 📚 Referensi
 
 - [LinuxServer Cloud9 Docker Hub](https://hub.docker.com/r/linuxserver/cloud9)
