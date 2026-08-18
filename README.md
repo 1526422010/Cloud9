@@ -84,5 +84,5 @@ curl -su user:pass https://domain  # -> HTTP 200
 ## Troubleshooting
 
 - **Certbot gagal** - pastikan DNS domain mengarah ke IP server & port 80/443 terbuka di firewall.
-- **Port bentrok** - pakai `C9_PORT=<port lain>` atau jawab prompt port-nya beda.
+- **Port bentrok** - pakai `C9_PORT=<port lain>` atau ketik  port-nya.
 - **Workspace ilang** - jangan hapus `/opt/cloud9/code`, itu folder data lo.
