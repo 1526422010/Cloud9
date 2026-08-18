@@ -85,6 +85,18 @@ if [ -z "$C9_PORT_ARG" ]; then
   [ -z "$C9_PORT_ARG" ] && C9_PORT_ARG=8000
 fi
 C9_PORT="$C9_PORT_ARG"
+# deteksi port bentrok sebelum lanjut (mis. caddy/apache pegang 80)
+if ss -tlnp 2>/dev/null | grep -qE "[:-]${NGINX_PORT} "; then
+  OWNER=$(ss -tlnp 2>/dev/null | grep -E "[:-]${NGINX_PORT} " | grep -oE 'users:\(\("[^"]+"' | head -1 | sed 's/users:(("//')
+  warn "Port ${NGINX_PORT} sudah dipakai ${OWNER:-proses lain} — nginx nggak bisa listen!"
+  warn "Pilih port lain (misal 8080) atau matikan service itu dulu, lalu jalankan ulang script."
+  exit 1
+fi
+# port cloud9 (host) juga dicek — biar nggak bentrok service lain
+if ss -tlnp 2>/dev/null | grep -qE "[:-]${C9_PORT} "; then
+  warn "Port ${C9_PORT} sudah dipakai host — C9_PORT=<port lain> sudo bash c9.sh ..."
+  exit 1
+fi
 
 # ---------- 4. install dependensi ----------
 echo
@@ -114,12 +126,10 @@ fi
 if ! has nginx; then
   ok "Install nginx ($SYS)..."
   case $SYS in
-    apt) apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nginx apache2-utils
-         systemctl enable --now nginx ;;
-    dnf) dnf install -y nginx httpd-tools; systemctl enable --now nginx ;;
-    apk) apk add --no-cache nginx apache2-utils; rc-update add nginx default; rc-service nginx start ;;
-    pacman) pacman -Sy --noconfirm nginx apache
-         systemctl enable --now nginx ;;
+    apt) apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nginx apache2-utils ;;
+    dnf) dnf install -y nginx httpd-tools ;;
+    apk) apk add --no-cache nginx apache2-utils ;;
+    pacman) pacman -Sy --noconfirm nginx apache ;;
   esac
 else ok "nginx sudah ada"; has htpasswd || { warn "htpasswd tidak ada"; case $SYS in
     apt) apt-get install -y -qq apache2-utils ;;
@@ -127,6 +137,15 @@ else ok "nginx sudah ada"; has htpasswd || { warn "htpasswd tidak ada"; case $SY
     apk) apk add --no-cache apache2-utils ;;
     pacman) pacman -Sy --noconfirm apache ;; esac; }
 fi
+
+# matikan default vhost (listens 80) biar nggak bentrok port custom kita
+if [ -e /etc/nginx/sites-enabled/default ]; then rm -f /etc/nginx/sites-enabled/default; fi
+# apk: jangan include default conf dari paket
+if [ "$SYS" = apk ] && [ -e /etc/nginx/http.d/default.conf ]; then mv /etc/nginx/http.d/default.conf /etc/nginx/http.d/default.conf.bak; fi
+
+# start nginx SEKARANG (baru install atau ulang jalankan), supaya reload nanti valid
+systemctl restart nginx 2>/dev/null || service nginx restart 2>/dev/null || { nginx -t && nginx; } \
+  || fail "nginx gagal start — cek 'systemctl status nginx'. Kemungkinan port 80 dipakai service lain (caddy/apache)."
 
 # ---------- 5. file konfigurasi ----------
 BASE=/opt/cloud9
@@ -188,7 +207,11 @@ EOF
 case $SYS in apk) install -m644 /etc/nginx/sites-available/cloud9 /etc/nginx/http.d/cloud9.conf ;;
             *) ln -sf ../sites-available/cloud9 /etc/nginx/sites-enabled/cloud9 ;;
 esac
-nginx -t && systemctl reload nginx || service nginx reload
+nginx -t || { fail \"konfigurasi nginx tidak valid\"; exit 1; }
+# reload kalau jalan, start kalau belum
+if systemctl is-active --quiet nginx 2>/dev/null; then systemctl reload nginx;
+elif service nginx status >/dev/null 2>&1; then service nginx reload;
+else systemctl restart nginx 2>/dev/null || service nginx restart 2>/dev/null || nginx; fi
 ok "nginx vhost + basic auth terpasang (listen port ${NGINX_PORT})"
 
 # ---------- 6. jalankan container ----------
