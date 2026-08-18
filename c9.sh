@@ -13,7 +13,8 @@ fail(){ echo "${RED}✘${NC} $*"; }
 
 DRY_RUN=0
 DOMAIN="${1:-}"; AUTH_USER="${2:-}"; AUTH_PASS="${3:-}"; EMAIL="${4:-}"
-C9_PORT="${C9_PORT:-8000}"   # port host (kiri). Ganti kalau 8000 kepake: C9_PORT=8300 sudo bash c9.sh
+C9_PORT_ARG="${C9_PORT:-}"   # env override, misal: C9_PORT=8300 sudo bash c9.sh
+C9_PORT=""
 if [ "${DOMAIN:-}" = "--dry-run" ]; then DRY_RUN=1; DOMAIN=""; fi
 
 # ---------- 1. deteksi OS ----------
@@ -48,8 +49,8 @@ if [ "$DRY_RUN" = 1 ]; then
   echo
   echo "── ${CYAN}Rencana (dry-run)${NC} ────────────────────────"
   echo "1. Install yang belum ada: docker, nginx, certbot(+plugin nginx), htpasswd tool"
-  echo "2. /opt/cloud9/  -> Dockerfile (python3+pip) + compose (cloud9 bind 127.0.0.1:${C9_PORT})"
-  echo "3. nginx vhost: https://DOMAIN -> 127.0.0.1:${C9_PORT} + basic auth /etc/nginx/.htpasswd-cloud9"
+  echo "2. /opt/cloud9/  -> Dockerfile (python3+pip) + compose (cloud9 bind 127.0.0.1:${C9_PORT:-8000})"
+  echo "3. nginx vhost: https://DOMAIN -> 127.0.0.1:${C9_PORT:-8000} + basic auth /etc/nginx/.htpasswd-cloud9"
   echo "4. certbot --nginx -> SSL gratis (port 80/443 harus terbuka, DNS sudah mengarah)"
   echo "5. Verifikasi: curl https://DOMAIN -> HTTP 401 (auth aktif)"
   echo
@@ -75,6 +76,11 @@ if [ -z "$AUTH_PASS" ]; then
   [ "$AUTH_PASS" != "$AUTH_PASS2" ] && { fail "Password tidak sama"; exit 1; }
   [ ${#AUTH_PASS} -lt 6 ] && { fail "Password minimal 6 karakter"; exit 1; }
 fi
+if [ -z "$C9_PORT_ARG" ]; then
+  read -rp "Port host untuk Cloud9 (default 8000, sesuaikan firewall): " C9_PORT_ARG
+  [ -z "$C9_PORT_ARG" ] && C9_PORT_ARG=8000
+fi
+C9_PORT="$C9_PORT_ARG"
 if [ -z "$EMAIL" ]; then
   read -rp "Email untuk Let's Encrypt (kosongkan jika tidak mau): " EMAIL
 fi
@@ -232,8 +238,6 @@ esac
 echo "  Username: $AUTH_USER   |   Password: (yang lo input)"
 echo
 echo "${YELLOW}Catatan:${NC}"
-echo "  • Image linuxserver/cloud9 sudah DEPRECATED (tidak diupdate lagi)."
-echo "    Alternatif: linuxserver/code-server — ganti nama image di Dockerfile+compose, sisanya sama."
 echo "  • Workspace: $BASE/code (bind mount, aman dari reset container)"
 echo "  • Install python/pip tambahan di container: docker exec cloud9 apt-get install -y <paket>"
 echo "  • Mau akses docker dari dalam cloud9? tambah volume docker.sock: /var/run/docker.sock"

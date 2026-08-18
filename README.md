@@ -22,7 +22,7 @@ cd Cloud9
 sudo bash c9.sh
 ```
 
-Lalu ikuti prompt: **domain/subdomain, username, password, email (opsional)**.
+Lalu ikuti prompt: **domain/subdomain, username, password, port (default 8000), email (opsional)**.
 
 Atau non-interaktif:
 
@@ -38,7 +38,9 @@ bash c9.sh --dry-run
 
 ## Port
 
-Default port host `8000`. Kalau sudah kepake, ganti via env:
+Prompt interaktif nanya port host. Isi sesuai port yang lo buka di firewall (misal 80/443 buat nginx, plus 1 port buat Cloud9). Kosongkan = default `8000`.
+
+Atau set via env tanpa prompt:
 
 ```bash
 C9_PORT=8300 sudo bash c9.sh
@@ -82,5 +84,5 @@ curl -su user:pass https://domain  # -> HTTP 200
 ## Troubleshooting
 
 - **Certbot gagal** - pastikan DNS domain mengarah ke IP server & port 80/443 terbuka di firewall.
-- **Port 8000 sudah kepake** - pakai `C9_PORT=<port lain>` seperti di atas.
+- **Port bentrok** - pakai `C9_PORT=<port lain>` atau jawab prompt port-nya beda.
 - **Workspace ilang** - jangan hapus `/opt/cloud9/code`, itu folder data lo.
