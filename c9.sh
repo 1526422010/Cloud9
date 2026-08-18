@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# c9-setup.sh — auto setup LinuxServer Cloud9 + nginx (basic auth + SSL)
+# c9-setup.sh — auto setup LinuxServer Cloud9 + nginx (basic auth, tanpa SSL)
 # Usage:
-#   sudo ./c9-setup.sh                    # interaktif (domain, user, pass, email)
-#   sudo ./c9-setup.sh DOMAIN USER PASS [EMAIL]
-#   ./c9-setup.sh --dry-run               # deteksi OS + rekomendasi jalur, tanpa eksekusi
+#   sudo ./c9-setup.sh                          # interaktif (domain, user, pass, port nginx, port cloud9)
+#   sudo ./c9-setup.sh DOMAIN USER PASS [NGINX_PORT]
+#   ./c9-setup.sh --dry-run                     # deteksi OS + rekomendasi jalur, tanpa eksekusi
 set -euo pipefail
 
 GREEN=$'\e[32m'; YELLOW=$'\e[33m'; RED=$'\e[31m'; CYAN=$'\e[36m'; NC=$'\e[0m'
@@ -12,7 +12,7 @@ warn(){ echo "${YELLOW}⚠${NC} $*"; }
 fail(){ echo "${RED}✘${NC} $*"; }
 
 DRY_RUN=0
-DOMAIN="${1:-}"; AUTH_USER="${2:-}"; AUTH_PASS="${3:-}"; EMAIL="${4:-}"
+DOMAIN="${1:-}"; AUTH_USER="${2:-}"; AUTH_PASS="${3:-}"; NGINX_PORT="${4:-}"
 C9_PORT_ARG="${C9_PORT:-}"   # env override, misal: C9_PORT=8300 sudo bash c9.sh
 C9_PORT=""
 if [ "${DOMAIN:-}" = "--dry-run" ]; then DRY_RUN=1; DOMAIN=""; fi
@@ -43,18 +43,16 @@ esac
 has() { command -v "$1" >/dev/null 2>&1; }
 echo "  docker:      $(command -v docker >/dev/null && echo ADA || echo BELUM)"
 echo "  nginx:       $(command -v nginx >/dev/null && echo ADA || echo BELUM)"
-echo "  certbot:     $(command -v certbot >/dev/null && echo ADA || echo BELUM)"
 
 if [ "$DRY_RUN" = 1 ]; then
   echo
   echo "── ${CYAN}Rencana (dry-run)${NC} ────────────────────────"
-  echo "1. Install yang belum ada: docker, nginx, certbot(+plugin nginx), htpasswd tool"
+  echo "1. Install yang belum ada: docker, nginx, htpasswd tool (tanpa certbot/SSL)"
   echo "2. /opt/cloud9/  -> Dockerfile (python3+pip) + compose (cloud9 bind 127.0.0.1:${C9_PORT:-8000})"
-  echo "3. nginx vhost: https://DOMAIN -> 127.0.0.1:${C9_PORT:-8000} + basic auth /etc/nginx/.htpasswd-cloud9"
-  echo "4. certbot --nginx -> SSL gratis (port 80/443 harus terbuka, DNS sudah mengarah)"
-  echo "5. Verifikasi: curl https://DOMAIN -> HTTP 401 (auth aktif)"
+  echo "3. nginx vhost: listen port ${NGINX_PORT:-80} -> 127.0.0.1:${C9_PORT:-8000} + basic auth /etc/nginx/.htpasswd-cloud9"
+  echo "4. Verifikasi: curl http://DOMAIN[:${NGINX_PORT:-80}] -> HTTP 401 (auth aktif)"
   echo
-  echo "Akses: ${GREEN}https://DOMAIN${NC} — bukan domain:port"
+  echo "Akses: ${GREEN}http://DOMAIN[:${NGINX_PORT:-80}]${NC} — tanpa SSL (certbot sengaja dimatikan)"
   exit 0
 fi
 
@@ -76,14 +74,17 @@ if [ -z "$AUTH_PASS" ]; then
   [ "$AUTH_PASS" != "$AUTH_PASS2" ] && { fail "Password tidak sama"; exit 1; }
   [ ${#AUTH_PASS} -lt 6 ] && { fail "Password minimal 6 karakter"; exit 1; }
 fi
+if [ -z "$NGINX_PORT" ]; then
+  read -rp "Port nginx (default 80, misal 8080 kalau 80 dipakai): " NGINX_PORT
+  [ -z "$NGINX_PORT" ] && NGINX_PORT=80
+fi
+[[ "$NGINX_PORT" =~ ^[0-9]+$ ]] && [ "$NGINX_PORT" -ge 1 ] && [ "$NGINX_PORT" -le 65535 ] \
+  || { fail "Port nginx tidak valid: $NGINX_PORT"; exit 1; }
 if [ -z "$C9_PORT_ARG" ]; then
   read -rp "Port host untuk Cloud9 (default 8000, sesuaikan firewall): " C9_PORT_ARG
   [ -z "$C9_PORT_ARG" ] && C9_PORT_ARG=8000
 fi
 C9_PORT="$C9_PORT_ARG"
-if [ -z "$EMAIL" ]; then
-  read -rp "Email untuk Let's Encrypt (kosongkan jika tidak mau): " EMAIL
-fi
 
 # ---------- 4. install dependensi ----------
 echo
@@ -127,16 +128,6 @@ else ok "nginx sudah ada"; has htpasswd || { warn "htpasswd tidak ada"; case $SY
     pacman) pacman -Sy --noconfirm apache ;; esac; }
 fi
 
-if ! has certbot; then
-  ok "Install certbot ($SYS)..."
-  case $SYS in
-    apt) DEBIAN_FRONTEND=noninteractive apt-get install -y -qq certbot python3-certbot-nginx ;;
-    dnf) dnf install -y certbot python3-certbot-nginx ;;
-    apk) apk add --no-cache certbot certbot-nginx ;;
-    pacman) pacman -Sy --noconfirm certbot certbot-nginx ;;
-  esac
-else ok "certbot sudah ada"; fi
-
 # ---------- 5. file konfigurasi ----------
 BASE=/opt/cloud9
 mkdir -p "$BASE/code"
@@ -176,7 +167,8 @@ htpasswd -bc /etc/nginx/.htpasswd-cloud9 "$AUTH_USER" "$AUTH_PASS" >/dev/null 2>
 
 cat > /etc/nginx/sites-available/cloud9 <<EOF
 server {
-    listen 80;
+    listen ${NGINX_PORT};
+
     server_name ${DOMAIN};
 
     location / {
@@ -197,7 +189,7 @@ case $SYS in apk) install -m644 /etc/nginx/sites-available/cloud9 /etc/nginx/htt
             *) ln -sf ../sites-available/cloud9 /etc/nginx/sites-enabled/cloud9 ;;
 esac
 nginx -t && systemctl reload nginx || service nginx reload
-ok "nginx vhost + basic auth terpasang"
+ok "nginx vhost + basic auth terpasang (listen port ${NGINX_PORT})"
 
 # ---------- 6. jalankan container ----------
 echo
@@ -214,30 +206,21 @@ curl -su "$AUTH_USER:$AUTH_PASS" -o /dev/null http://127.0.0.1:${C9_PORT} \
 ok "Verifikasi python di container:"
 docker exec cloud9 sh -c 'python3 -V && pip3 -V' || warn "python3 belum bisa diverifikasi"
 
-# ---------- 7. SSL ----------
-echo
-echo "── ${CYAN}SSL Let's Encrypt${NC} ─────────────────────────"
-CERTBOT_ARGS="certonly --nginx -d $DOMAIN --agree-tos --redirect"
-if [ -n "$EMAIL" ]; then CERTBOT_ARGS="$CERTBOT_ARGS -m $EMAIL"; else CERTBOT_ARGS="$CERTBOT_ARGS --register-unsafely-without-email"; fi
-if certbot $CERTBOT_ARGS --non-interactive >/dev/null 2>&1; then
-  ok "SSL aktif: https://${DOMAIN}"
-else
-  warn "certbot gagal — cek: DNS sudah diarahkan ke IP server? port 80/443 terbuka?"
-  warn "Sementara akses via http://${DOMAIN} (basic auth tetap aktif)"
-fi
-
-# ---------- 8. verifikasi akhir ----------
+# ---------- 7. verifikasi akhir ----------
 echo
 echo "── ${CYAN}Hasil${NC} ─────────────────────────────────────"
-HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" "https://${DOMAIN}" || curl -s -o /dev/null -w "%{http_code}" "http://${DOMAIN}")
+URL="http://${DOMAIN}"
+[ "$NGINX_PORT" != "80" ] && URL="${URL}:${NGINX_PORT}"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$URL")
 case "$HTTP_CODE" in
-  401) ok "Akses: https://${DOMAIN}   (401 = auth aktif, benar)" ;;
-  200) ok "Akses: https://${DOMAIN}" ;;
+  401) ok "Akses: ${URL}   (401 = auth aktif, benar)" ;;
+  200) ok "Akses: ${URL}" ;;
   *)   warn "HTTP ${HTTP_CODE} — mungkin DNS/port belum siap" ;;
 esac
 echo "  Username: $AUTH_USER   |   Password: (yang lo input)"
 echo
 echo "${YELLOW}Catatan:${NC}"
+echo "  • Tanpa SSL (certbot dimatikan) — akses via HTTP. Mau HTTPS nanti: install certbot dan jalankan 'certbot --nginx -d ${DOMAIN}' manual."
 echo "  • Workspace: $BASE/code (bind mount, aman dari reset container)"
 echo "  • Install python/pip tambahan di container: docker exec cloud9 apt-get install -y <paket>"
 echo "  • Mau akses docker dari dalam cloud9? tambah volume docker.sock: /var/run/docker.sock"
