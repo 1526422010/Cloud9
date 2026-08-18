@@ -143,9 +143,9 @@ if [ -e /etc/nginx/sites-enabled/default ]; then rm -f /etc/nginx/sites-enabled/
 # apk: jangan include default conf dari paket
 if [ "$SYS" = apk ] && [ -e /etc/nginx/http.d/default.conf ]; then mv /etc/nginx/http.d/default.conf /etc/nginx/http.d/default.conf.bak; fi
 
-# start nginx SEKARANG (baru install atau ulang jalankan), supaya reload nanti valid
-systemctl restart nginx 2>/dev/null || service nginx restart 2>/dev/null || { nginx -t && nginx; } \
-  || fail "nginx gagal start — cek 'systemctl status nginx'. Kemungkinan port 80 dipakai service lain (caddy/apache)."
+# STOP nginx dulu — install paket (apt/dnf) auto-start nginx di port 80 sebelum
+# vhost custom ditulis, itu yang bikin bentrok. Start ulang menyusul di tahap 5.
+systemctl stop nginx 2>/dev/null || service nginx stop 2>/dev/null || true
 
 # ---------- 5. file konfigurasi ----------
 BASE=/opt/cloud9
@@ -212,11 +212,10 @@ EOF
 case $SYS in apk) install -m644 /etc/nginx/sites-available/cloud9 /etc/nginx/http.d/cloud9.conf ;;
             *) ln -sf ../sites-available/cloud9 /etc/nginx/sites-enabled/cloud9 ;;
 esac
-nginx -t || { fail \"konfigurasi nginx tidak valid\"; exit 1; }
-# reload kalau jalan, start kalau belum
-if systemctl is-active --quiet nginx 2>/dev/null; then systemctl reload nginx;
-elif service nginx status >/dev/null 2>&1; then service nginx reload;
-else systemctl restart nginx 2>/dev/null || service nginx restart 2>/dev/null || nginx; fi
+nginx -t || { fail "konfigurasi nginx tidak valid"; exit 1; }
+# start nginx (selalu restart — di-stop di tahap 4, reload nggak relevant)
+systemctl restart nginx 2>/dev/null || service nginx restart 2>/dev/null || { nginx; } \
+  || { fail "nginx gagal start di port ${NGINX_PORT} — cek: systemctl status nginx"; exit 1; }
 ok "nginx vhost + basic auth terpasang (listen port ${NGINX_PORT})"
 
 # ---------- 6. jalankan container ----------
@@ -224,13 +223,18 @@ echo
 echo "── ${CYAN}Jalankan Cloud9${NC} ──────────────────────────"
 cd "$BASE"
 $COMPOSE_CMD up -d --build
-for i in $(seq 1 30); do
+# tunggu container siap — pull/build image pertama bisa lama (>30s)
+for i in $(seq 1 120); do
   curl -s -o /dev/null http://127.0.0.1:${C9_PORT} && break   # exit 0 walau 401 (auth aktif = container sudah jalan)
-  sleep 1
+  sleep 2
 done
 # auth ganda: cloud9 juga minta login (USERNAME/PASSWORD di env) — konsisten dengan nginx
-curl -su "$AUTH_USER:$AUTH_PASS" -o /dev/null http://127.0.0.1:${C9_PORT} \
-  && ok "cloud9 running (http://127.0.0.1:${C9_PORT})" || fail "cloud9 tidak merespon"
+if curl -su "$AUTH_USER:$AUTH_PASS" -o /dev/null http://127.0.0.1:${C9_PORT}; then
+  ok "cloud9 running (http://127.0.0.1:${C9_PORT})"
+else
+  fail "cloud9 tidak merespon — cek: docker ps -a, docker logs cloud9"
+  exit 1
+fi
 ok "Verifikasi python di container:"
 docker exec cloud9 sh -c 'python3 -V && pip3 -V' || warn "python3 belum bisa diverifikasi"
 
@@ -239,12 +243,19 @@ echo
 echo "── ${CYAN}Hasil${NC} ─────────────────────────────────────"
 URL="http://${DOMAIN}"
 [ "$NGINX_PORT" != "80" ] && URL="${URL}:${NGINX_PORT}"
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$URL")
+# cek via localhost (bukan DNS) supaya nggak false-negative kalau DNS belum resolve
+LOCAL_URL="http://127.0.0.1:${NGINX_PORT}"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$LOCAL_URL")
 case "$HTTP_CODE" in
-  401) ok "Akses: ${URL}   (401 = auth aktif, benar)" ;;
-  200) ok "Akses: ${URL}" ;;
-  *)   warn "HTTP ${HTTP_CODE} — mungkin DNS/port belum siap" ;;
+  401) ok "nginx+auth OK (HTTP 401 via ${LOCAL_URL})" ;;
+  200) ok "nginx OK (HTTP 200 via ${LOCAL_URL})" ;;
+  *)   fail "HTTP ${HTTP_CODE} via ${LOCAL_URL} — cek: systemctl status nginx, docker ps" ;;
 esac
+# cek container cloud9
+docker ps --format '{{.Names}} {{.Status}}' | grep -q '^cloud9 ' \
+  && ok "cloud9 container running" || fail "cloud9 container tidak jalan — cek: docker ps -a, docker logs cloud9"
+echo
+echo "  Akses:    ${URL}"
 echo "  Username: $AUTH_USER   |   Password: (yang lo input)"
 echo
 echo "${YELLOW}Catatan:${NC}"
