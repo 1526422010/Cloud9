@@ -13,6 +13,7 @@ fail(){ echo "${RED}✘${NC} $*"; }
 
 DRY_RUN=0
 DOMAIN="${1:-}"; AUTH_USER="${2:-}"; AUTH_PASS="${3:-}"; EMAIL="${4:-}"
+C9_PORT="${C9_PORT:-8000}"   # port host (kiri). Ganti kalau 8000 kepake: C9_PORT=8300 sudo bash c9.sh
 if [ "${DOMAIN:-}" = "--dry-run" ]; then DRY_RUN=1; DOMAIN=""; fi
 
 # ---------- 1. deteksi OS ----------
@@ -47,8 +48,8 @@ if [ "$DRY_RUN" = 1 ]; then
   echo
   echo "── ${CYAN}Rencana (dry-run)${NC} ────────────────────────"
   echo "1. Install yang belum ada: docker, nginx, certbot(+plugin nginx), htpasswd tool"
-  echo "2. /opt/cloud9/  -> Dockerfile (python3+pip) + compose (cloud9 bind 127.0.0.1:8000)"
-  echo "3. nginx vhost: https://DOMAIN -> 127.0.0.1:8000 + basic auth /etc/nginx/.htpasswd-cloud9"
+  echo "2. /opt/cloud9/  -> Dockerfile (python3+pip) + compose (cloud9 bind 127.0.0.1:${C9_PORT})"
+  echo "3. nginx vhost: https://DOMAIN -> 127.0.0.1:${C9_PORT} + basic auth /etc/nginx/.htpasswd-cloud9"
   echo "4. certbot --nginx -> SSL gratis (port 80/443 harus terbuka, DNS sudah mengarah)"
   echo "5. Verifikasi: curl https://DOMAIN -> HTTP 401 (auth aktif)"
   echo
@@ -159,7 +160,7 @@ services:
     volumes:
       - ${BASE}/code:/code
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${C9_PORT}:8000"
     restart: unless-stopped
 EOF
 
@@ -175,7 +176,7 @@ server {
     location / {
         auth_basic "Restricted";
         auth_basic_user_file /etc/nginx/.htpasswd-cloud9;
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://127.0.0.1:${C9_PORT};
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -198,12 +199,12 @@ echo "── ${CYAN}Jalankan Cloud9${NC} ─────────────
 cd "$BASE"
 $COMPOSE_CMD up -d --build
 for i in $(seq 1 30); do
-  curl -s -o /dev/null http://127.0.0.1:8000 && break   # exit 0 walau 401 (auth aktif = container sudah jalan)
+  curl -s -o /dev/null http://127.0.0.1:${C9_PORT} && break   # exit 0 walau 401 (auth aktif = container sudah jalan)
   sleep 1
 done
 # auth ganda: cloud9 juga minta login (USERNAME/PASSWORD di env) — konsisten dengan nginx
-curl -su "$AUTH_USER:$AUTH_PASS" -o /dev/null http://127.0.0.1:8000 \
-  && ok "cloud9 running (http://127.0.0.1:8000)" || fail "cloud9 tidak merespon"
+curl -su "$AUTH_USER:$AUTH_PASS" -o /dev/null http://127.0.0.1:${C9_PORT} \
+  && ok "cloud9 running (http://127.0.0.1:${C9_PORT})" || fail "cloud9 tidak merespon"
 ok "Verifikasi python di container:"
 docker exec cloud9 sh -c 'python3 -V && pip3 -V' || warn "python3 belum bisa diverifikasi"
 
