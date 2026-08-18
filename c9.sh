@@ -97,6 +97,13 @@ if ss -tlnp 2>/dev/null | grep -qE "[:-]${C9_PORT} "; then
   warn "Port ${C9_PORT} sudah dipakai host — C9_PORT=<port lain> sudo bash c9.sh ..."
   exit 1
 fi
+# warn kalau 80/443 dipegang proxy lain (caddy/apache dll) — akses domain TANPA :PORT
+# bakal kena proxy itu (bukan nginx kita) dan bisa redirect ke HTTPS / ERR_SSL_PROTOCOL_ERROR
+if ss -tlnp 2>/dev/null | grep -qE '[:](80|443) '; then
+  warn "Port 80/443 dipegang proxy lain (Caddy/Apache dll)."
+  warn "Akses WAJIB pakai port eksplisit: http://${DOMAIN}:${NGINX_PORT}"
+  warn "Kalau buka http://${DOMAIN} tanpa :PORT, request kena proxy 80 tadi — bisa redirect ke HTTPS."
+fi
 
 # ---------- 4. install dependensi ----------
 echo

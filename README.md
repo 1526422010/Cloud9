@@ -93,7 +93,7 @@ sudo certbot --nginx -d domain
 
 ## Troubleshooting
 
-- **Akses selalu redirect ke HTTPS / `ERR_SSL_PROTOCOL_ERROR`** - ini terjadi kalau port 80/443 dipegang proxy lain (mis. Caddy/Apache) yang auto-redirect ke HTTPS. **Fix: akses wajib pakai port eksplisit** `http://domain:PORT` (contoh `http://c9.pakaw.id:1900`). Akses `http://domain` tanpa port bakal kena redirect HTTPS oleh proxy 80 tadi, bukan nginx.
+- **Akses selalu redirect ke HTTPS / `ERR_SSL_PROTOCOL_ERROR`** - ini terjadi kalau port 80/443 dipegang proxy lain (mis. Caddy/Apache) yang auto-redirect ke HTTPS. **Fix: akses wajib pakai port eksplisit** `http://domain:PORT` (contoh `http://c9.example.com:8080`). Akses `http://domain` tanpa port bakal kena redirect HTTPS oleh proxy 80 tadi, bukan nginx.
 - **Port nginx bentrok** - pakai port lain: `sudo bash c9.sh domain user pass 8080`.
 - **Port container bentrok** - pakai `C9_PORT=<port lain>`.
 - **Workspace ilang** - jangan hapus `/opt/cloud9/code`, itu folder data lo.
